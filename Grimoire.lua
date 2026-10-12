@@ -1,5 +1,5 @@
 --[[----------------------------------------------------------------------------
-  Grimoire v1.0.0 (WotLK 3.3.5a client, Grimfall server / Ascension core)
+  Grimoire v1.1.0 (WotLK 3.3.5a client, Grimfall server / Ascension core)
 
   Lists what your character has, with what each thing does, in a copyable
   window (and in SavedVariables, per character):
@@ -23,7 +23,7 @@
 ------------------------------------------------------------------------------]]
 
 local ADDON_NAME = "Grimoire"
-local VERSION    = "1.0.0"
+local VERSION    = "1.1.0"
 local BOOK       = BOOKTYPE_SPELL or "spell"
 
 local DISCOVER_PATTERNS = { "rune", "talent", "advancement", "mystic", "essence" }
@@ -187,16 +187,34 @@ captureDriver:SetScript("OnUpdate", function(self)
     local lines = readTip(tip)
     local name = lines[1] and lineText(lines[1]) or ""
     if name == "" then return end
-    local body = {}
-    for i = 2, #lines do body[#body + 1] = lineText(lines[i]) end
-    local isNew = cdb.runes[name] == nil
-    cdb.runes[name] = { name = name, lines = body, captured = date("%Y-%m-%d %H:%M") }
-    if isNew then
-        say("captured |cffffd24a" .. name .. "|r")
-        if GrimoireFrame and GrimoireFrame:IsShown() and currentTab == "runes" then
-            Grimoire_Render()
+    local body, rank, maxRank = {}, nil, nil
+    for i = 2, #lines do
+        local t = lineText(lines[i])
+        local r, m = t:match("^Rank (%d+)/(%d+)")
+        if r then
+            rank, maxRank = tonumber(r), tonumber(m)
+        elseif t:match("^Next [Rr]ank") then
+            break
+        else
+            body[#body + 1] = t
         end
     end
+    -- Talent tooltips carry "Rank x/y"; rune (Mystic Enchant) names start "Rune of".
+    local store, kind
+    if rank then
+        store, kind = cdb.capturedTalents, "talent"
+    elseif name:match("^Rune of") then
+        store, kind = cdb.runes, "rune"
+    else
+        return
+    end
+    local isNew = store[name] == nil
+    store[name] = { name = name, lines = body, rank = rank, maxRank = maxRank,
+                    captured = date("%Y-%m-%d %H:%M") }
+    if isNew then
+        say("captured " .. kind .. " |cffffd24a" .. name .. "|r")
+    end
+    if GrimoireFrame and GrimoireFrame:IsShown() then Grimoire_Render() end
 end)
 
 local function queueCapture(tip)
@@ -257,6 +275,113 @@ local function discoverScan()
     table.sort(found)
     db.discover = found
     say(#found .. " matching globals stored (Discovery tab).")
+end
+
+-- Grimfall's client extension (clientextensions.dll) registers these. Only
+-- READ functions are listed: nothing here learns, rerolls, banishes, claims,
+-- commits or requests anything.
+local PROBE_FUNCS = {
+    "IsClasslessEnabled", "IsCoAEnabled", "GetClasslessRole", "GetClasslessClassCreateIndex",
+    "GetKnownClasslessSpellIds", "GetClasslessSpellEntrySpellIds", "GetClasslessSpellEntryRows",
+    "GetClasslessSpecializationSkillLineIds", "GetClasslessSkillLineSpellIds",
+    "GetClasslessSkillLineSpellEntryRows", "GetClasslessTalentTreeData",
+    "GetClasslessTalentCurrentRankIndex", "GetClasslessTalentTabIdForSkillLine",
+    "IsClasslessTalentConsideredAbility", "ClasslessIsSpellKnown", "ClasslessCanEverLearnSpell",
+    "Ex_GetCoAClassInfo", "Ex_GetCoATalentCatalog", "Ex_GetCoATalentRevision", "Ex_GetCoATalentState",
+    "MysticEnchant_GetAllMEInfo", "MysticEnchant_GetAllMESpellIds", "MysticEnchant_GetAllREInfo",
+    "MysticEnchant_GetAllRESpellIds", "MysticEnchant_GetKnownMEInfo", "MysticEnchant_GetKnownREInfo",
+    "MysticEnchant_GetKnownRESpellIds", "MysticEnchant_GetKnownRECountByQuality",
+    "MysticEnchant_GetSpellQuality", "MysticEnchant_GetCurrentOffer",
+    "SkillCard_GetCards", "SkillCard_GetNumActiveCards", "SkillCard_GetMaxActiveCards",
+    "SkillCard_GetActiveCardBySlot", "GetActiveSpecializationIndex",
+}
+
+local probeBudget
+-- Copy a value into something SavedVariables can store, with size limits.
+local function storable(v, depth)
+    local t = type(v)
+    if t == "number" or t == "string" or t == "boolean" or t == "nil" then return v end
+    if t ~= "table" then return "<" .. t .. ">" end
+    if depth > 4 then return "<table: too deep>" end
+    local out, n = {}, 0
+    for k, vv in pairs(v) do
+        n = n + 1
+        probeBudget = probeBudget - 1
+        if n > 400 or probeBudget <= 0 then out["..."] = "truncated"; break end
+        out[type(k) == "number" and k or tostring(k)] = storable(vv, depth + 1)
+    end
+    return out
+end
+
+local function probeCall(fn, ...)
+    local res = { pcall(fn, ...) }
+    local entry = { ok = res[1], n = #res - 1 }
+    if res[1] then
+        entry.returns = {}
+        for i = 2, #res do entry.returns[i - 1] = storable(res[i], 1) end
+    else
+        entry.err = tostring(res[2])
+    end
+    return entry
+end
+
+-- First number found in a probe result (to feed functions that need an id).
+local function firstNumber(entry)
+    if not (entry and entry.ok and entry.returns) then return nil end
+    for _, r in ipairs(entry.returns) do
+        if type(r) == "number" then return r end
+        if type(r) == "table" then
+            for _, x in pairs(r) do
+                if type(x) == "number" then return x end
+                if type(x) == "table" then
+                    for _, y in pairs(x) do if type(y) == "number" then return y end end
+                end
+            end
+        end
+    end
+end
+
+local function probeApi()
+    probeBudget = 20000
+    local out, missing = {}, {}
+    for _, name in ipairs(PROBE_FUNCS) do
+        local fn = _G[name]
+        if type(fn) == "function" then
+            out[name] = { noArgs = probeCall(fn) }
+        else
+            missing[#missing + 1] = name
+        end
+    end
+    -- Second pass with sample ids, for functions that want an argument.
+    local spellId = firstNumber(out.GetKnownClasslessSpellIds and out.GetKnownClasslessSpellIds.noArgs)
+    local skillLine = firstNumber(out.GetClasslessSpecializationSkillLineIds
+        and out.GetClasslessSpecializationSkillLineIds.noArgs)
+    local reId = firstNumber(out.MysticEnchant_GetKnownRESpellIds and out.MysticEnchant_GetKnownRESpellIds.noArgs)
+    local function try(name, label, ...)
+        if out[name] and select("#", ...) > 0 and (...) ~= nil then
+            out[name][label] = probeCall(_G[name], ...)
+        end
+    end
+    try("GetClasslessSkillLineSpellIds", "skillLine", skillLine)
+    try("GetClasslessSkillLineSpellEntryRows", "skillLine", skillLine)
+    try("GetClasslessTalentTabIdForSkillLine", "skillLine", skillLine)
+    try("GetClasslessTalentTreeData", "skillLine", skillLine)
+    try("GetClasslessTalentTreeData", "one", 1)
+    try("GetClasslessTalentCurrentRankIndex", "spell", spellId)
+    try("IsClasslessTalentConsideredAbility", "spell", spellId)
+    try("ClasslessIsSpellKnown", "spell", spellId)
+    try("GetClasslessSpellEntryRows", "spell", spellId)
+    try("MysticEnchant_GetSpellQuality", "re", reId)
+    try("SkillCard_GetActiveCardBySlot", "one", 1)
+    for i = 1, (GetNumTalentTabs() or 0) do
+        out["GetTalentTabInfo#" .. i] = { noArgs = probeCall(GetTalentTabInfo, i) }
+        out["GetNumTalents#" .. i] = { noArgs = probeCall(GetNumTalents, i) }
+    end
+    out._numTalentTabs = GetNumTalentTabs()
+    out._missing = missing
+    out._when = date("%Y-%m-%d %H:%M")
+    db.probe = out
+    say("API probe saved. Type /reload so it is written to disk.")
 end
 
 local function frameLabel(f)
@@ -335,9 +460,17 @@ local function renderTalents()
         if shown == 0 then out[#out + 1] = "    (no points in this tree)" end
         out[#out + 1] = ""
     end
-    if #out == 0 then
-        out[1] = "The client reported no talent trees."
-        out[2] = "Grimfall may use a custom talent system: try /grim scan and check the Discovery tab."
+    local names = {}
+    for name, t in pairs(cdb.capturedTalents) do
+        if showAll or (t.rank or 0) > 0 then names[#names + 1] = name end
+    end
+    table.sort(names)
+    out[#out + 1] = "== Captured from the Classless window (" .. #names .. ") =="
+    out[#out + 1] = "Press Capture, open the Classless talent trees and hover each talent."
+    for _, name in ipairs(names) do
+        local t = cdb.capturedTalents[name]
+        out[#out + 1] = t.name .. " [" .. (t.rank or 0) .. "/" .. (t.maxRank or "?") .. "]"
+        for _, l in ipairs(t.lines) do out[#out + 1] = "    " .. l end
     end
     return out
 end
@@ -347,7 +480,7 @@ local function renderRunes()
     for name in pairs(cdb.runes) do names[#names + 1] = name end
     table.sort(names)
     out[1] = "Capture is " .. (capturing and "ON" or "OFF") .. ". " .. #names .. " rune(s) captured."
-    out[2] = "To capture: press Capture, open the rune window and hover every rune."
+    out[2] = "To capture: press Capture, open the Runes page and hover every Active Rune."
     out[3] = ""
     for _, name in ipairs(names) do
         local r = cdb.runes[name]
@@ -481,7 +614,9 @@ function Grimoire_Render()
     for key, b in pairs(tabButtons) do
         if key == currentTab then b:LockHighlight() else b:UnlockHighlight() end
     end
-    setShown(captureBtn, currentTab == "runes")
+    setShown(captureBtn, currentTab == "runes" or currentTab == "talents")
+    captureBtn:ClearAllPoints()
+    captureBtn:SetPoint("BOTTOMLEFT", currentTab == "talents" and 156 or 20, 16)
     captureBtn:SetText(capturing and "Stop capture" or "Capture")
     setShown(allBtn, currentTab == "talents")
     allBtn:SetText(db.showAllTalents and "Learned only" or "Show all talents")
@@ -510,9 +645,9 @@ end
 function Grimoire_Capture(state)
     if state == nil then capturing = not capturing else capturing = state end
     if capturing then
-        say("rune capture ON. Open the rune window and hover every rune. /grim capture to stop.")
+        say("capture ON. Hover talents and runes in the Classless window. /grim capture to stop.")
     else
-        say("rune capture OFF.")
+        say("capture OFF.")
     end
     if frame and frame:IsShown() then Grimoire_Render() end
 end
@@ -529,6 +664,7 @@ ev:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" and arg1 == ADDON_NAME then
         db, cdb = GrimoireDB, GrimoireCharDB
         cdb.runes = cdb.runes or {}
+        cdb.capturedTalents = cdb.capturedTalents or {}
     elseif event == "PLAYER_ENTERING_WORLD" then
         -- Snapshot once shortly after login so SavedVariables has data even
         -- if the window is never opened.
@@ -554,6 +690,12 @@ SlashCmdList.GRIMOIRE = function(msg)
         Grimoire_Show(msg)
     elseif msg == "capture" then
         Grimoire_Capture()
+    elseif msg == "probe" then
+        probeApi()
+    elseif msg == "talents clear" then
+        wipe(cdb.capturedTalents)
+        say("captured talents cleared.")
+        if frame and frame:IsShown() then Grimoire_Render() end
     elseif msg == "runes clear" then
         wipe(cdb.runes)
         say("captured runes cleared.")
@@ -567,7 +709,8 @@ SlashCmdList.GRIMOIRE = function(msg)
         say("/grim - open/close the window")
         say("/grim abilities | talents | runes | discovery - open a tab")
         say("/grim capture - toggle rune capture (hover runes while ON)")
-        say("/grim runes clear - forget captured runes")
+        say("/grim runes clear | talents clear - forget captured runes/talents")
+        say("/grim probe - test Grimfall's classless/rune functions, then /reload")
         say("/grim scan - look for rune/talent APIs (Discovery tab)")
         say("/grim mouse - describe the window under the cursor")
     end
