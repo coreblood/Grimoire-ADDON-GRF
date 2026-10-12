@@ -1,5 +1,8 @@
 # Grimoire Changelog
 
+## v1.2.3 - 2026-10-12
+- Fix: v1.2.1 and v1.2.2 shipped an empty Grimoire.toc, so WoW did not load the addon (no minimap button, no /grim).
+
 ## v1.2.2 - 2026-10-12
 - The report text is now editable: delete or change anything before copying. Switching tabs or pressing Refresh redraws the full report.
 - Clicking anywhere in the text area puts the cursor in it.

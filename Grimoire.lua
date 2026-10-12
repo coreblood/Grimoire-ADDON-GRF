@@ -1,5 +1,5 @@
 --[[----------------------------------------------------------------------------
-  Grimoire v1.2.2 (WotLK 3.3.5a client, Grimfall server / Ascension core)
+  Grimoire v1.2.3 (WotLK 3.3.5a client, Grimfall server / Ascension core)
 
   Lists what your character has, with what each thing does, in a copyable
   window (and in SavedVariables, per character):
@@ -24,7 +24,7 @@
 ------------------------------------------------------------------------------]]
 
 local ADDON_NAME = "Grimoire"
-local VERSION    = "1.2.2"
+local VERSION    = "1.2.3"
 local BOOK       = BOOKTYPE_SPELL or "spell"
 
 local DISCOVER_PATTERNS = { "rune", "talent", "advancement", "mystic", "essence" }
