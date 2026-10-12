@@ -1,5 +1,10 @@
 # Grimoire Changelog
 
+## v1.2.1 - 2026-10-12
+- Talents tab lists only talents you have ranks in; trees with no points are hidden (tick "Show unlearned talents" to see everything).
+- Each tree is labelled with its class (e.g. "Death Knight - Frost", "Paladin - Protection") and trees are sorted by class.
+- Total talent points spent shown at the top. The empty "Captured from the Classless window" section is gone (the talent API reads all classes on Grimfall).
+
 ## v1.2.0 - 2026-10-12
 - Minimap button: left-click opens/closes Grimoire, right-click toggles capture (icon turns red while capturing), drag to move.
 - Options page under Esc > Interface > AddOns > Grimoire: show minimap button, show unlearned talents, capture on/off, plus Open, API probe and clear buttons.

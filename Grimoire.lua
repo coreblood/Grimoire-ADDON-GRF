@@ -1,5 +1,5 @@
 --[[----------------------------------------------------------------------------
-  Grimoire v1.2.0 (WotLK 3.3.5a client, Grimfall server / Ascension core)
+  Grimoire v1.2.1 (WotLK 3.3.5a client, Grimfall server / Ascension core)
 
   Lists what your character has, with what each thing does, in a copyable
   window (and in SavedVariables, per character):
@@ -23,7 +23,7 @@
 ------------------------------------------------------------------------------]]
 
 local ADDON_NAME = "Grimoire"
-local VERSION    = "1.2.0"
+local VERSION    = "1.2.1"
 local BOOK       = BOOKTYPE_SPELL or "spell"
 
 local DISCOVER_PATTERNS = { "rune", "talent", "advancement", "mystic", "essence" }
@@ -125,10 +125,27 @@ local function collectAbilities()
     return tabs
 end
 
+-- Talent tree backgrounds are named <Class><Tree> (e.g. "DeathKnightFrost"),
+-- which tells apart Grimfall's same-named trees (Holy, Protection, Frost...).
+local CLASS_PREFIXES = {
+    { "DeathKnight", "Death Knight" }, { "Druid", "Druid" }, { "Hunter", "Hunter" },
+    { "Mage", "Mage" }, { "Paladin", "Paladin" }, { "Priest", "Priest" },
+    { "Rogue", "Rogue" }, { "Shaman", "Shaman" }, { "Warlock", "Warlock" },
+    { "Warrior", "Warrior" },
+}
+
+local function classFromBackground(bg)
+    if type(bg) ~= "string" then return nil end
+    bg = bg:match("([^\\/]+)$") or bg
+    for _, c in ipairs(CLASS_PREFIXES) do
+        if bg:sub(1, #c[1]):lower() == c[1]:lower() then return c[2] end
+    end
+end
+
 local function collectTalents()
     local tabs = {}
     for tab = 1, (GetNumTalentTabs() or 0) do
-        local tabName, _, spent = GetTalentTabInfo(tab)
+        local tabName, _, spent, background = GetTalentTabInfo(tab)
         local list = {}
         for i = 1, (GetNumTalents(tab) or 0) do
             local name, _, tier, column, rank, maxRank = GetTalentInfo(tab, i)
@@ -160,8 +177,13 @@ local function collectTalents()
             if a.tier ~= b.tier then return a.tier < b.tier end
             return a.column < b.column
         end)
-        tabs[#tabs + 1] = { name = tabName or ("Tree " .. tab), spent = spent or 0, talents = list }
+        tabs[#tabs + 1] = { name = tabName or ("Tree " .. tab), spent = spent or 0,
+                            class = classFromBackground(background), talents = list }
     end
+    table.sort(tabs, function(a, b)
+        if (a.class or "") ~= (b.class or "") then return (a.class or "") < (b.class or "") end
+        return a.name < b.name
+    end)
     return tabs
 end
 
@@ -446,27 +468,38 @@ end
 
 local function renderTalents()
     local out, showAll = {}, db.showAllTalents
+    local total = 0
     for _, tab in ipairs(cdb.talents or {}) do
-        out[#out + 1] = "== " .. tab.name .. " (" .. tab.spent .. " points) =="
-        local shown = 0
+        local learned = {}
         for _, t in ipairs(tab.talents) do
-            if showAll or t.rank > 0 then
-                shown = shown + 1
+            if showAll or t.rank > 0 then learned[#learned + 1] = t end
+            total = total + t.rank
+        end
+        -- Only trees you have points in (all trees with "Show unlearned talents").
+        if #learned > 0 then
+            local title = tab.class and (tab.class .. " - " .. tab.name) or tab.name
+            out[#out + 1] = "== " .. title .. " (" .. tab.spent .. " points) =="
+            for _, t in ipairs(learned) do
                 out[#out + 1] = t.name .. " [" .. t.rank .. "/" .. t.maxRank .. "]"
-                if t.requires then out[#out + 1] = "    " .. t.requires end
+                if t.requires and showAll then out[#out + 1] = "    " .. t.requires end
                 if t.desc ~= "" then out[#out + 1] = "    " .. t.desc end
             end
+            out[#out + 1] = ""
         end
-        if shown == 0 then out[#out + 1] = "    (no points in this tree)" end
-        out[#out + 1] = ""
+    end
+    if #out > 0 then
+        table.insert(out, 1, "Total talent points spent: " .. total)
+        table.insert(out, 2, "")
     end
     local names = {}
     for name, t in pairs(cdb.capturedTalents) do
         if showAll or (t.rank or 0) > 0 then names[#names + 1] = name end
     end
     table.sort(names)
-    out[#out + 1] = "== Captured from the Classless window (" .. #names .. ") =="
-    out[#out + 1] = "Press Capture, open the Classless talent trees and hover each talent."
+    -- Only needed if the talent API ever misses something: shown when non-empty.
+    if #names > 0 then
+        out[#out + 1] = "== Captured from the Classless window (" .. #names .. ") =="
+    end
     for _, name in ipairs(names) do
         local t = cdb.capturedTalents[name]
         out[#out + 1] = t.name .. " [" .. (t.rank or 0) .. "/" .. (t.maxRank or "?") .. "]"
