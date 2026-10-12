@@ -2,7 +2,7 @@
 ## Title: Grimoire
 ## Notes: Lists your character's abilities, talents and runes with what they do — copyable.
 ## Author: Mhortai
-## Version: 1.1.0
+## Version: 1.2.0
 ## SavedVariables: GrimoireDB
 ## SavedVariablesPerCharacter: GrimoireCharDB
 

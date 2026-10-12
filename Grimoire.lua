@@ -1,5 +1,5 @@
 --[[----------------------------------------------------------------------------
-  Grimoire v1.1.0 (WotLK 3.3.5a client, Grimfall server / Ascension core)
+  Grimoire v1.2.0 (WotLK 3.3.5a client, Grimfall server / Ascension core)
 
   Lists what your character has, with what each thing does, in a copyable
   window (and in SavedVariables, per character):
@@ -23,7 +23,7 @@
 ------------------------------------------------------------------------------]]
 
 local ADDON_NAME = "Grimoire"
-local VERSION    = "1.1.0"
+local VERSION    = "1.2.0"
 local BOOK       = BOOKTYPE_SPELL or "spell"
 
 local DISCOVER_PATTERNS = { "rune", "talent", "advancement", "mystic", "essence" }
@@ -649,7 +649,164 @@ function Grimoire_Capture(state)
     else
         say("capture OFF.")
     end
+    -- Minimap tint and the options checkbox are created later in the file,
+    -- so reach them through their global frame names.
+    if GrimoireMinimapButton then
+        if capturing then GrimoireMinimapButton.icon:SetVertexColor(1, 0.45, 0.45)
+        else GrimoireMinimapButton.icon:SetVertexColor(1, 1, 1) end
+    end
+    if GrimoireOptCapture then GrimoireOptCapture:SetChecked(capturing) end
     if frame and frame:IsShown() then Grimoire_Render() end
+end
+
+-------------------------------------------------------------------------------
+-- Minimap button (same texture layout and free-form drag as ScrollReader)
+-------------------------------------------------------------------------------
+
+local ICON = "Interface\\Icons\\INV_Misc_Book_09"
+local minimapButton, optionsPanel
+
+local function createMinimapButton()
+    local mm = CreateFrame("Button", "GrimoireMinimapButton", Minimap)
+    mm:SetWidth(31)
+    mm:SetHeight(31)
+    mm:SetFrameStrata("MEDIUM")
+    mm:SetFrameLevel(8)
+    mm:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    mm:RegisterForDrag("LeftButton")
+    mm:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+
+    local overlay = mm:CreateTexture(nil, "OVERLAY")
+    overlay:SetWidth(53)
+    overlay:SetHeight(53)
+    overlay:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+    overlay:SetPoint("TOPLEFT")
+
+    local background = mm:CreateTexture(nil, "BACKGROUND")
+    background:SetWidth(20)
+    background:SetHeight(20)
+    background:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
+    background:SetPoint("TOPLEFT", 7, -5)
+
+    local icon = mm:CreateTexture(nil, "ARTWORK")
+    icon:SetWidth(17)
+    icon:SetHeight(17)
+    icon:SetTexture(ICON)
+    icon:SetTexCoord(0.05, 0.95, 0.05, 0.95)
+    icon:SetPoint("TOPLEFT", 7, -6)
+    mm.icon = icon
+
+    local function reposition()
+        mm:ClearAllPoints()
+        mm:SetPoint("CENTER", Minimap, "CENTER", db.minimap.x, db.minimap.y)
+    end
+    mm.Reposition = reposition
+
+    local function onDragUpdate()
+        local mx, my = Minimap:GetCenter()
+        local px, py = GetCursorPosition()
+        local scale = Minimap:GetEffectiveScale()
+        db.minimap.x = px / scale - mx
+        db.minimap.y = py / scale - my
+        reposition()
+    end
+    mm:SetScript("OnDragStart", function(self) self:SetScript("OnUpdate", onDragUpdate) end)
+    mm:SetScript("OnDragStop", function(self) self:SetScript("OnUpdate", nil) end)
+    mm:SetScript("OnClick", function(self, button)
+        if button == "RightButton" then
+            Grimoire_Capture()
+        elseif frame and frame:IsShown() then
+            frame:Hide()
+        else
+            Grimoire_Show()
+        end
+    end)
+    mm:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        GameTooltip:AddLine("Grimoire")
+        GameTooltip:AddLine("Left-click: open / close", 1, 1, 1)
+        GameTooltip:AddLine("Right-click: capture " .. (capturing and "|cffff7070ON|r" or "OFF"), 1, 1, 1)
+        GameTooltip:AddLine("Drag: move", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    mm:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    reposition()
+    if db.minimap.hide then mm:Hide() end
+    minimapButton = mm
+end
+
+local function setMinimapShown(show)
+    db.minimap.hide = not show
+    if minimapButton then
+        if show then minimapButton.Reposition(); minimapButton:Show() else minimapButton:Hide() end
+    end
+end
+
+-------------------------------------------------------------------------------
+-- Interface Options panel (Esc > Interface > AddOns > Grimoire)
+-------------------------------------------------------------------------------
+
+local function createOptionsPanel()
+    local p = CreateFrame("Frame", "GrimoireOptionsPanel", UIParent)
+    p.name = "Grimoire"
+    p:Hide()
+
+    local title = p:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", 16, -16)
+    title:SetText("Grimoire  |cff888888v" .. VERSION .. "|r")
+    local sub = p:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    sub:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
+    sub:SetText("Lists your abilities, talents and runes with what they do.")
+
+    local checks = {}
+    local function addCheck(key, label, tip, getter, setter, anchor)
+        local cb = CreateFrame("CheckButton", "GrimoireOpt" .. key, p, "InterfaceOptionsCheckButtonTemplate")
+        cb:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -10)
+        _G[cb:GetName() .. "Text"]:SetText(label)
+        cb.tooltipText = tip
+        cb:SetScript("OnClick", function(self) setter(self:GetChecked() and true or false) end)
+        cb.refresh = function() cb:SetChecked(getter()) end
+        checks[#checks + 1] = cb
+        return cb
+    end
+
+    local c1 = addCheck("Minimap", "Show minimap button", "Left-click opens Grimoire, right-click toggles capture.",
+        function() return not db.minimap.hide end, setMinimapShown, sub)
+    local c2 = addCheck("AllTalents", "Show unlearned talents", "List talents with 0 points too.",
+        function() return db.showAllTalents end,
+        function(v) db.showAllTalents = v; if frame and frame:IsShown() then Grimoire_Render() end end, c1)
+    local c3 = addCheck("Capture", "Capture talents and runes from tooltips (this session)",
+        "While on, hovering a talent or an Active Rune in the Classless window records it.",
+        function() return capturing end, function(v) Grimoire_Capture(v) end, c2)
+
+    local function addButton(text, width, anchor, x, y, onClick)
+        local b = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
+        b:SetWidth(width)
+        b:SetHeight(22)
+        b:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", x, y)
+        b:SetText(text)
+        b:SetScript("OnClick", onClick)
+        return b
+    end
+    local open = addButton("Open Grimoire", 150, c3, 0, -18, function() Grimoire_Show() end)
+    local probe = addButton("Run API probe", 150, open, 0, -8, function() SlashCmdList.GRIMOIRE("probe") end)
+    local clrT = addButton("Clear captured talents", 170, open, 160, 22, function() SlashCmdList.GRIMOIRE("talents clear") end)
+    addButton("Clear captured runes", 170, clrT, 0, -8, function() SlashCmdList.GRIMOIRE("runes clear") end)
+
+    local hint = p:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    hint:SetPoint("TOPLEFT", probe, "BOTTOMLEFT", 0, -14)
+    hint:SetText("Slash commands: /grim  (type /grim help for the list)")
+
+    p:SetScript("OnShow", function() for _, cb in ipairs(checks) do cb.refresh() end end)
+    InterfaceOptions_AddCategory(p)
+    optionsPanel = p
+end
+
+local function openOptions()
+    -- 3.3.5 needs two calls the first time the panel is opened.
+    InterfaceOptionsFrame_OpenToCategory(optionsPanel)
+    InterfaceOptionsFrame_OpenToCategory(optionsPanel)
 end
 
 -------------------------------------------------------------------------------
@@ -665,6 +822,9 @@ ev:SetScript("OnEvent", function(self, event, arg1)
         db, cdb = GrimoireDB, GrimoireCharDB
         cdb.runes = cdb.runes or {}
         cdb.capturedTalents = cdb.capturedTalents or {}
+        db.minimap = db.minimap or { hide = false, x = -40, y = -72 }
+        createMinimapButton()
+        createOptionsPanel()
     elseif event == "PLAYER_ENTERING_WORLD" then
         -- Snapshot once shortly after login so SavedVariables has data even
         -- if the window is never opened.
@@ -690,6 +850,11 @@ SlashCmdList.GRIMOIRE = function(msg)
         Grimoire_Show(msg)
     elseif msg == "capture" then
         Grimoire_Capture()
+    elseif msg == "minimap" then
+        setMinimapShown(db.minimap.hide)
+        say("minimap button " .. (db.minimap.hide and "hidden" or "shown") .. ".")
+    elseif msg == "options" or msg == "config" then
+        openOptions()
     elseif msg == "probe" then
         probeApi()
     elseif msg == "talents clear" then
@@ -708,7 +873,9 @@ SlashCmdList.GRIMOIRE = function(msg)
     else
         say("/grim - open/close the window")
         say("/grim abilities | talents | runes | discovery - open a tab")
-        say("/grim capture - toggle rune capture (hover runes while ON)")
+        say("/grim capture - toggle capture (hover talents and runes while ON)")
+        say("/grim minimap - show/hide the minimap button")
+        say("/grim options - open the Interface options page")
         say("/grim runes clear | talents clear - forget captured runes/talents")
         say("/grim probe - test Grimfall's classless/rune functions, then /reload")
         say("/grim scan - look for rune/talent APIs (Discovery tab)")

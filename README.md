@@ -6,6 +6,10 @@ Lists your character's abilities, talents and runes, with what each one does, fo
 - Copy everything: click the text, press Ctrl+A, then Ctrl+C.
 - The data is also saved per character in `WTF\Account\<account>\<realm>\<character>\SavedVariables\Grimoire.lua`.
 
+## Minimap and options
+- Minimap button: left-click opens Grimoire, right-click turns capture on/off, drag to move.
+- Esc > Interface > AddOns > Grimoire has the settings (or type `/grim options`).
+
 ## Runes
 Grimfall's rune window is custom, so Grimoire captures runes from their tooltips:
 1. Press **Capture** on the Runes tab (or type `/grim capture`).

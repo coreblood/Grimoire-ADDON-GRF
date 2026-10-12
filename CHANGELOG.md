@@ -1,5 +1,10 @@
 # Grimoire Changelog
 
+## v1.2.0 - 2026-10-12
+- Minimap button: left-click opens/closes Grimoire, right-click toggles capture (icon turns red while capturing), drag to move.
+- Options page under Esc > Interface > AddOns > Grimoire: show minimap button, show unlearned talents, capture on/off, plus Open, API probe and clear buttons.
+- New commands: `/grim minimap`, `/grim options`.
+
 ## v1.1.0 - 2026-10-12
 - Classless support: Capture now also records talents hovered in the Classless trees (any class), shown on the Talents tab with their rank.
 - Rune capture limited to "Rune of ..." tooltips; other tooltips are ignored.
