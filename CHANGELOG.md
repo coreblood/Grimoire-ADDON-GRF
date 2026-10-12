@@ -1,5 +1,9 @@
 # Grimoire Changelog
 
+## v1.2.2 - 2026-10-12
+- The report text is now editable: delete or change anything before copying. Switching tabs or pressing Refresh redraws the full report.
+- Clicking anywhere in the text area puts the cursor in it.
+
 ## v1.2.1 - 2026-10-12
 - Talents tab lists only talents you have ranks in; trees with no points are hidden (tick "Show unlearned talents" to see everything).
 - Each tree is labelled with its class (e.g. "Death Knight - Frost", "Paladin - Protection") and trees are sorted by class.

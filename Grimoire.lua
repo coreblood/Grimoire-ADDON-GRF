@@ -1,5 +1,5 @@
 --[[----------------------------------------------------------------------------
-  Grimoire v1.2.1 (WotLK 3.3.5a client, Grimfall server / Ascension core)
+  Grimoire v1.2.2 (WotLK 3.3.5a client, Grimfall server / Ascension core)
 
   Lists what your character has, with what each thing does, in a copyable
   window (and in SavedVariables, per character):
@@ -18,12 +18,13 @@
                               text inside it (type it while hovering the rune
                               window, then press Enter)
 
-  Copy: click the text, Ctrl+A, Ctrl+C. The same data is in
+  Copy: click the text, Ctrl+A, Ctrl+C. The text is editable (trim it
+  before copying); switching tabs or Refresh redraws it. The same data is in
   WTF\Account\<acct>\<realm>\<char>\SavedVariables\Grimoire.lua after logout.
 ------------------------------------------------------------------------------]]
 
 local ADDON_NAME = "Grimoire"
-local VERSION    = "1.2.1"
+local VERSION    = "1.2.2"
 local BOOK       = BOOKTYPE_SPELL or "spell"
 
 local DISCOVER_PATTERNS = { "rune", "talent", "advancement", "mystic", "essence" }
@@ -614,7 +615,7 @@ local function buildFrame()
 
     stamp = frame:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
     stamp:SetPoint("BOTTOMRIGHT", -24, 22)
-    stamp:SetText("Click text, Ctrl+A, Ctrl+C to copy")
+    stamp:SetText("Edit freely - Ctrl+A, Ctrl+C to copy - Refresh restores")
 
     local scroll = CreateFrame("ScrollFrame", "GrimoireScroll", frame, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", 22, -76)
@@ -628,9 +629,9 @@ local function buildFrame()
     edit:SetWidth(570)
     edit:SetHeight(400)
     edit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    -- Read-only: any typing is undone.
-    edit:SetScript("OnTextChanged", function(self, user)
-        if user and shownText then self:SetText(shownText) end
+    -- Editable so you can trim the report before copying; switching tabs or
+    -- Refresh redraws it from the scanned data.
+    edit:SetScript("OnTextChanged", function(self)
         if ScrollingEdit_OnTextChanged then ScrollingEdit_OnTextChanged(self, scroll) end
     end)
     edit:SetScript("OnCursorChanged", function(self, x, y, w, h)
@@ -640,6 +641,8 @@ local function buildFrame()
         if ScrollingEdit_OnUpdate then ScrollingEdit_OnUpdate(self, elapsed, scroll) end
     end)
     scroll:SetScrollChild(edit)
+    scroll:EnableMouse(true)
+    scroll:SetScript("OnMouseDown", function() edit:SetFocus() end)
 end
 
 function Grimoire_Render()
