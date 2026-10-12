@@ -1,5 +1,5 @@
 --[[----------------------------------------------------------------------------
-  Grimoire v1.2.3 (WotLK 3.3.5a client, Grimfall server / Ascension core)
+  Grimoire v1.3.0 (WotLK 3.3.5a client, Grimfall server / Ascension core)
 
   Lists what your character has, with what each thing does, in a copyable
   window (and in SavedVariables, per character):
@@ -24,7 +24,7 @@
 ------------------------------------------------------------------------------]]
 
 local ADDON_NAME = "Grimoire"
-local VERSION    = "1.2.3"
+local VERSION    = "1.3.0"
 local BOOK       = BOOKTYPE_SPELL or "spell"
 
 local DISCOVER_PATTERNS = { "rune", "talent", "advancement", "mystic", "essence" }
@@ -198,6 +198,39 @@ end
 -- Rune capture (tooltip hook)
 -------------------------------------------------------------------------------
 
+-- Quality labels shown under each entry of the Classless "Active Runes"
+-- list. The rune collection grid shows names only, so finding one of these
+-- next to the hovered entry is how an ACTIVE rune is told apart.
+local QUALITY_ORDER = { "Artifact", "Legendary", "Epic", "Rare", "Uncommon", "Common" }
+local QUALITY_RANK = {}
+for i, q in ipairs(QUALITY_ORDER) do QUALITY_RANK[q] = i end
+
+local function findQualityLabel(f, depth)
+    if not f or depth > 2 then return nil end
+    if f.GetRegions then
+        for _, r in ipairs({ f:GetRegions() }) do
+            if r.GetObjectType and r:GetObjectType() == "FontString" then
+                local t = clean(r:GetText())
+                if QUALITY_RANK[t] then return t end
+            end
+        end
+    end
+    if f.GetChildren then
+        for _, c in ipairs({ f:GetChildren() }) do
+            local q = findQualityLabel(c, depth + 1)
+            if q then return q end
+        end
+    end
+end
+
+-- The hovered list entry is the tooltip owner, or (for icon sub-buttons) its parent.
+local function activeRuneQuality(tip)
+    local owner = tip.GetOwner and tip:GetOwner()
+    if not owner then return nil end
+    return findQualityLabel(owner, 0)
+        or (owner.GetParent and findQualityLabel(owner:GetParent(), 1))
+end
+
 local pendingTip
 local captureDriver = CreateFrame("Frame")
 captureDriver:Hide()
@@ -223,17 +256,21 @@ captureDriver:SetScript("OnUpdate", function(self)
         end
     end
     -- Talent tooltips carry "Rank x/y"; rune (Mystic Enchant) names start "Rune of".
-    local store, kind
+    local store, kind, quality
     if rank then
         store, kind = cdb.capturedTalents, "talent"
     elseif name:match("^Rune of") then
+        -- Only runes in the Active Runes list (they carry a quality label);
+        -- the collection grid on the left is ignored.
+        quality = activeRuneQuality(tip)
+        if not quality then return end
         store, kind = cdb.runes, "rune"
     else
         return
     end
     local isNew = store[name] == nil
     store[name] = { name = name, lines = body, rank = rank, maxRank = maxRank,
-                    captured = date("%Y-%m-%d %H:%M") }
+                    quality = quality, captured = date("%Y-%m-%d %H:%M") }
     if isNew then
         say("captured " .. kind .. " |cffffd24a" .. name .. "|r")
     end
@@ -509,17 +546,39 @@ local function renderTalents()
     return out
 end
 
+-- Indent every line of a tooltip text, including its embedded line breaks.
+local function addIndented(out, text)
+    for piece in (text .. "\n"):gmatch("(.-)\n") do
+        out[#out + 1] = (piece == "") and "" or ("    " .. piece)
+    end
+end
+
 local function renderRunes()
     local out, names = {}, {}
     for name in pairs(cdb.runes) do names[#names + 1] = name end
-    table.sort(names)
-    out[1] = "Capture is " .. (capturing and "ON" or "OFF") .. ". " .. #names .. " rune(s) captured."
-    out[2] = "To capture: press Capture, open the Runes page and hover every Active Rune."
-    out[3] = ""
+    -- Grouped like the Active Runes column: Legendary first, then Epic, ...
+    table.sort(names, function(a, b)
+        local qa = QUALITY_RANK[cdb.runes[a].quality] or 99
+        local qb = QUALITY_RANK[cdb.runes[b].quality] or 99
+        if qa ~= qb then return qa < qb end
+        return a < b
+    end)
+    out[1] = "Capture is " .. (capturing and "ON" or "OFF") .. ". " .. #names .. " active rune(s) captured."
+    out[2] = "To capture: press Capture, open the Runes page and hover each rune in the Active Runes list."
+    out[3] = "Swapped runes? /grim runes clear, then capture again."
+    local group
     for _, name in ipairs(names) do
         local r = cdb.runes[name]
+        if r.quality ~= group then
+            group = r.quality
+            if out[#out] ~= "" then out[#out + 1] = "" end
+            out[#out + 1] = "== " .. (group or "Unknown quality") .. " =="
+        end
         out[#out + 1] = r.name
-        for _, l in ipairs(r.lines) do out[#out + 1] = "    " .. l end
+        for _, l in ipairs(r.lines) do
+            if l ~= r.quality then addIndented(out, l) end  -- quality is the group header
+        end
+        out[#out + 1] = ""
     end
     return out
 end
@@ -858,6 +917,11 @@ ev:SetScript("OnEvent", function(self, event, arg1)
         db, cdb = GrimoireDB, GrimoireCharDB
         cdb.runes = cdb.runes or {}
         cdb.capturedTalents = cdb.capturedTalents or {}
+        -- Runes captured before v1.3.0 have no quality and may come from the
+        -- collection grid rather than the Active Runes list: drop them.
+        for name, r in pairs(cdb.runes) do
+            if not r.quality then cdb.runes[name] = nil end
+        end
         db.minimap = db.minimap or { hide = false, x = -40, y = -72 }
         createMinimapButton()
         createOptionsPanel()

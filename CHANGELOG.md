@@ -1,5 +1,11 @@
 # Grimoire Changelog
 
+## v1.3.0 - 2026-10-12
+- Rune capture records only runes in the **Active Runes** list (entries that show a quality label); hovering the rune collection grid is ignored.
+- Runes tab groups runes by quality (Legendary, then Epic, ...), like the Active Runes column.
+- Multi-line rune descriptions are indented correctly.
+- Runes captured by older versions (which could include collection runes) are removed once on load.
+
 ## v1.2.3 - 2026-10-12
 - Fix: v1.2.1 and v1.2.2 shipped an empty Grimoire.toc, so WoW did not load the addon (no minimap button, no /grim).
 
