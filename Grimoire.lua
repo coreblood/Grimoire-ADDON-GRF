@@ -1,5 +1,5 @@
 --[[----------------------------------------------------------------------------
-  Grimoire v1.3.0 (WotLK 3.3.5a client, Grimfall server / Ascension core)
+  Grimoire v1.3.1 (WotLK 3.3.5a client, Grimfall server / Ascension core)
 
   Lists what your character has, with what each thing does, in a copyable
   window (and in SavedVariables, per character):
@@ -24,7 +24,7 @@
 ------------------------------------------------------------------------------]]
 
 local ADDON_NAME = "Grimoire"
-local VERSION    = "1.3.0"
+local VERSION    = "1.3.1"
 local BOOK       = BOOKTYPE_SPELL or "spell"
 
 local DISCOVER_PATTERNS = { "rune", "talent", "advancement", "mystic", "essence" }
@@ -202,16 +202,19 @@ end
 -- list. The rune collection grid shows names only, so finding one of these
 -- next to the hovered entry is how an ACTIVE rune is told apart.
 local QUALITY_ORDER = { "Artifact", "Legendary", "Epic", "Rare", "Uncommon", "Common" }
-local QUALITY_RANK = {}
-for i, q in ipairs(QUALITY_ORDER) do QUALITY_RANK[q] = i end
+local QUALITY_RANK, QUALITY_BY_LOWER = {}, {}
+for i, q in ipairs(QUALITY_ORDER) do
+    QUALITY_RANK[q] = i
+    QUALITY_BY_LOWER[q:lower()] = q
+end
 
 local function findQualityLabel(f, depth)
-    if not f or depth > 2 then return nil end
+    if not f or depth > 3 then return nil end
     if f.GetRegions then
         for _, r in ipairs({ f:GetRegions() }) do
             if r.GetObjectType and r:GetObjectType() == "FontString" then
-                local t = clean(r:GetText())
-                if QUALITY_RANK[t] then return t end
+                local q = QUALITY_BY_LOWER[clean(r:GetText()):lower()]
+                if q then return q end
             end
         end
     end
@@ -224,6 +227,14 @@ local function findQualityLabel(f, depth)
 end
 
 -- The hovered list entry is the tooltip owner, or (for icon sub-buttons) its parent.
+local function frameLabelSafe(f)
+    local n = f.GetName and f:GetName()
+    if n then return n end
+    local p = f.GetParent and f:GetParent()
+    local pn = p and p.GetName and p:GetName()
+    return "<anonymous, parent " .. (pn or "?") .. ">"
+end
+
 local function activeRuneQuality(tip)
     local owner = tip.GetOwner and tip:GetOwner()
     if not owner then return nil end
@@ -256,16 +267,24 @@ captureDriver:SetScript("OnUpdate", function(self)
         end
     end
     -- Talent tooltips carry "Rank x/y"; rune (Mystic Enchant) names start "Rune of".
-    local store, kind, quality
-    if rank then
-        store, kind = cdb.capturedTalents, "talent"
-    elseif name:match("^Rune of") then
-        -- Only runes in the Active Runes list (they carry a quality label);
-        -- the collection grid on the left is ignored.
-        quality = activeRuneQuality(tip)
-        if not quality then return end
+    -- An entry showing a quality label (Legendary/Epic/Rare/Uncommon) is an
+    -- Active Runes entry, whatever the rune is called. Checked first, so a
+    -- rune tooltip with a "Rank x/y" line isn't taken for a talent.
+    -- The collection grid has no labels, so it's ignored.
+    local store, kind
+    local quality = activeRuneQuality(tip)
+    if quality then
         store, kind = cdb.runes, "rune"
+        rank, maxRank = nil, nil
+    elseif rank then
+        store, kind = cdb.capturedTalents, "talent"
     else
+        -- Keep a short trail of skipped tooltips for the Discovery tab.
+        local owner = tip.GetOwner and tip:GetOwner()
+        db.skipped = db.skipped or {}
+        table.insert(db.skipped, 1, name .. "  (owner: " .. (owner and frameLabelSafe(owner) or "none")
+            .. ", no quality label found)")
+        while #db.skipped > 15 do table.remove(db.skipped) end
         return
     end
     local isNew = store[name] == nil
@@ -586,6 +605,9 @@ end
 local function renderDiscovery()
     local out = { "/grim mouse  (hover a window, type it, press Enter)" }
     for _, l in ipairs(db.mouse or { "  nothing yet" }) do out[#out + 1] = l end
+    out[#out + 1] = ""
+    out[#out + 1] = "Tooltips skipped while capturing (newest first):"
+    for _, l in ipairs(db.skipped or { "  none" }) do out[#out + 1] = "  " .. l end
     out[#out + 1] = ""
     out[#out + 1] = "/grim scan  (globals named rune/talent/advancement/mystic/essence, plus C_*)"
     for _, l in ipairs(db.discover or { "  nothing yet" }) do out[#out + 1] = l end

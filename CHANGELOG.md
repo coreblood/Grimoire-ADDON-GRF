@@ -1,5 +1,10 @@
 # Grimoire Changelog
 
+## v1.3.1 - 2026-10-13
+- Fix: Uncommon active runes were not captured. Any Active Runes entry that shows a quality label is now captured, whatever the rune is called, and it is checked before the talent rule (a rune tooltip with "Rank x/y" was taken for a talent).
+- Quality labels are matched case-insensitively and searched one level deeper in the entry.
+- Discovery tab lists the last tooltips skipped while capturing, and why.
+
 ## v1.3.0 - 2026-10-12
 - Rune capture records only runes in the **Active Runes** list (entries that show a quality label); hovering the rune collection grid is ignored.
 - Runes tab groups runes by quality (Legendary, then Epic, ...), like the Active Runes column.
